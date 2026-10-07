@@ -51,16 +51,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "combat": {
         # Roblox's default attack is unbound, so it is NOT Space - Space is
-        # jump. This is the one binding that matters and it is verified from
-        # Roblox's own default controls, not from a guide.
+        # jump. Verified against the live game.
         "attack_key": "mouse1",
+        # Shown bottom-right in-game as "Dash  Q + WASD".
+        "dash_key": "q",
         "m1_hold_ms": 18,
         "m1_interval_ms": 90,
         # Sources consistently report a 5th hit in an M1 string pushing the
         # character out of range, so the loop stops at 4 and waits.
         "combo_length": 4,
         "skill_interval_ms": 4000,
-        "skill_keys": ["1", "2", "3"],
+        # CORRECTED from live observation. These were ["1","2","3"], which
+        # are the ITEM hotbar. The ability row is Z X C V B, with F on a
+        # separate slot. See config/measured_layout.md.
+        "skill_keys": ["z", "x", "c", "v", "b"],
         "use_skills": True,
     },
     "fishing": {

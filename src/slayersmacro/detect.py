@@ -204,13 +204,36 @@ class BarDetector:
 class HealthReader:
     """Reads a health bar as a 0..1 fraction.
 
-    Assumes the bar fills from the left and depletes toward it. Works on
-    the usual red/green health bar. Returns None rather than guessing when
-    the frame does not look like a bar.
+    Two shapes are handled, because the real game has both:
+
+    - a SOLID bar (the player's health, bottom-left) - one red block
+    - a SEGMENTED bar (the boss health, top-centre) - several red chunks
+      separated by dark gaps
+
+    The segmented case is why this cannot be "find the widest red
+    component". A boss at full health is four separate chunks, so the
+    widest component is one quarter of the bar and the naive reading
+    reports a full-health boss as nearly dead. Measuring the left-to-right
+    SPAN of red, divided by the full track width, is correct for both.
+
+    Returns None rather than guessing when the crop does not look like a
+    bar at all. A fabricated 0.0 is worse than no reading: downstream that
+    reads as a dead player.
     """
 
-    def __init__(self, pixels_per_pct: float = 0.0) -> None:
+    def __init__(self, pixels_per_pct: float = 0.0,
+                 segmented: bool | None = None,
+                 _threshold: float = 0.35) -> None:
         self.pixels_per_pct = pixels_per_pct
+        # None = auto-detect, which is right for the player bar and wrong
+        # for the boss bar, so callers should pass it explicitly when they
+        # know which bar they are looking at.
+        self.segmented = segmented
+        # Below this, a solid bar reads as 0.0 ("alive, nearly dead") rather
+        # than its true small value. 0.0 is what downstream wants - it is a
+        # decision threshold, not a measurement. Pass _threshold=0 to get
+        # the raw fraction.
+        self._threshold = _threshold
         self._calibrate: np.ndarray | None = None
 
     def calibrate(self, frame: np.ndarray) -> None:
@@ -218,22 +241,54 @@ class HealthReader:
         if frame is not None and frame.size:
             self._calibrate = frame.reshape(-1, 3)
 
-    def read(self, frame: np.ndarray, threshold: float = 0.35) -> float | None:
-        """Fraction of the bar that is still filled."""
+    def read(self, frame: np.ndarray,
+             threshold: float | None = None) -> float | None:
+        """Fraction of the bar that is still filled, 0..1."""
         if frame is None or frame.size == 0:
             return None
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
-        # Saturated and bright reads as "filled". Dark and desaturated as
-        # "empty". This survives the bar changing colour between states.
+        s, v = hsv[:, :, 1], hsv[:, :, 2]
+        # Saturated and bright reads as "filled". Robust to the bar
+        # changing colour between states.
         filled = (s > 90) & (v > 70)
-        frac = float(filled.mean())
-        if frac <= 0.02 or frac >= 0.98:
+
+        h, w = filled.shape
+        col_any = filled.any(axis=0)
+        if not col_any.any():
             return None
-        # Normalise against a learned full bar when we have one.
+
+        segmented = self.segmented
+        if segmented is None:
+            # Auto: a bar with gaps in its span is segmented. Look at runs
+            # of columns rather than pixels so the anti-aliasing between
+            # chunks does not read as a gap.
+            col_frac = filled.mean(axis=0)
+            on = col_frac > 0.35
+            runs = _count_runs(on)
+            segmented = runs >= 3
+
+        if segmented:
+            idx = np.flatnonzero(col_any)
+            span = float(idx[-1] - idx[0] + 1)
+            return min(1.0, span / max(1, w))
+
+        # Solid: the mean over the whole crop, which includes the empty
+        # portion of the track.
+        frac = float(filled.mean())
+        if frac <= 0.02 or frac >= 0.995:
+            return None
         if self.pixels_per_pct > 0:
             frac = min(1.0, frac / self.pixels_per_pct)
-        return frac if frac >= threshold else 0.0
+        thr = self._threshold if threshold is None else threshold
+        return frac if frac >= thr else 0.0
+
+
+def _count_runs(flags: np.ndarray) -> int:
+    """Number of contiguous True runs in a boolean array."""
+    if flags.size == 0 or not flags.any():
+        return 0
+    d = np.diff(np.concatenate(([0], flags.view(np.int8), [0])))
+    return int((d == 1).sum())
 
 
 class MovementWatch:

@@ -1,0 +1,16 @@
+{
+  "frame": [
+    2560,
+    1600
+  ],
+  "window": [
+    2560,
+    1571
+  ],
+  "bars": {
+    "player_health": [],
+    "boss_health": [],
+    "target_health": [],
+    "stamina": []
+  }
+}

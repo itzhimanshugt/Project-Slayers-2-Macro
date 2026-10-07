@@ -38,7 +38,11 @@ class CombatMacro(Macro):
         self.skill_interval = float(c["skill_interval_ms"]) / 1000.0
         self.skill_keys = list(c["skill_keys"])
         self.use_skills = bool(c.get("use_skills", True))
-        self.reader = HealthReader()
+        # Solid bar, bottom-left, per live observation.
+        self.reader = HealthReader(segmented=False)
+        # Ability keys in the real game are Z X C V B (plus F). Item hotbar
+        # is 1-5. See config/measured_layout.md.
+        self.dash_key = str(c.get("dash_key", "q")).lower()
         self.timing = (TimingProfile.load(
             target_ms=float(c["m1_interval_ms"]))
             if bool(ctx.cfg["adaptation"].get("learn_timing", True))
@@ -248,8 +252,12 @@ class BossMacro(Macro):
         self.retreat_at = float(b["retreat_hp_pct"]) / 100.0
         self.heal_ms = float(b["heal_ms"]) / 1000.0
         self.max_retreats = int(b["max_retreats"])
-        self.boss_hp = HealthReader()
-        self.my_hp = HealthReader()
+        # The two bars are different shapes in the real game: the boss bar
+        # is SEGMENTED into ~4 chunks, the player bar is solid. Reading
+        # them with the same code makes a full-health boss look nearly
+        # dead. Measured from live captures; see config/measured_layout.md.
+        self.boss_hp = HealthReader(segmented=True)
+        self.my_hp = HealthReader(segmented=False)
         self.timing = (TimingProfile.load(
             target_ms=float(b["attack_interval_ms"]))
             if bool(ctx.cfg["adaptation"].get("learn_timing", True))

@@ -18,11 +18,18 @@ m1_hold_ms = 18
 m1_interval_ms = 90
 combo_length = 4
 skill_interval_ms = 4000
+# CORRECTED from live observation of the running game. The previous value
+# ["1","2","3"] was the ITEM hotbar, not abilities. The ability row is
+# Z X C V B, with F on a separate slot. See measured_layout.md.
 skill_keys = [
-    "1",
-    "2",
-    "3",
+    "z",
+    "x",
+    "c",
+    "v",
+    "b",
 ]
+# Shown bottom-right in-game as "Dash  Q + WASD".
+dash_key = "q"
 
 [fishing]
 cast_interval_ms = 2600
