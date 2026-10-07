@@ -168,8 +168,20 @@ class RecoveryLadder:
         now = now if now is not None else time.perf_counter()
         return (now - self._since_action) >= self.cfg.step_pause_ms / 1000.0
 
+    @property
+    def exhausted(self) -> bool:
+        """True once max_cycles give-ups have been reached.
+
+        The caller must check this. Without a consumer, giving up just
+        resets the ladder to HOLD and it starts climbing again on the next
+        frame - an infinite retry loop that looks like work but is not.
+        """
+        return self._cycle >= self.cfg.max_cycles
+
     def fire(self, now: float | None = None) -> Rung | None:
         """Attempt the current rung. Returns the rung attempted, or None."""
+        if self.exhausted:
+            return None
         if not self.needs_action(now):
             return None
         now = now if now is not None else time.perf_counter()

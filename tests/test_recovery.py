@@ -143,6 +143,28 @@ class TestFailureHandling:
         pump(lad, ProblemReport.stuck(), frames=600)
         assert lad.cycle > 0, "must eventually give up rather than loop forever"
 
+    def test_exhausted_blocks_further_firing(self):
+        """The consumer check. Without it the ladder resets and climbs
+        again on the next frame, which is an infinite retry loop that looks
+        like work but achieves nothing."""
+        lad, calls = ladder(rung_results={r: False for r in Rung},
+                            max_cycles=1)
+        assert lad.exhausted is False
+        pump(lad, ProblemReport.stuck(), frames=200)
+        assert lad.exhausted is True
+        before = len(calls)
+        pump(lad, ProblemReport.stuck(), frames=200)
+        assert len(calls) == before, "fired again after giving up"
+
+    def test_success_clears_exhaustion(self):
+        # Every rung must FAIL to exhaust the ladder. If a rung succeeds it
+        # resets the cycle count, so exhaustion never happens.
+        lad, _ = ladder(rung_results={r: False for r in Rung}, max_cycles=1)
+        pump(lad, ProblemReport.stuck(), frames=200)
+        assert lad.exhausted is True
+        pump(lad, ProblemReport.fine(), frames=2)
+        assert lad.exhausted is False, "a success must reset the cycle count"
+
 
 class TestPacing:
     def test_step_pause_enforced(self):

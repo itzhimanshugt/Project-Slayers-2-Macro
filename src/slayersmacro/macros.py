@@ -458,6 +458,16 @@ class AfkFarmMacro(Macro):
 
             self.ladder.observe(obstruction_report(moving,
                                                    self._control_down, True))
+            # The ladder gives up after max_cycles, but only stops if
+            # something consumes that. Without this check it resets to HOLD
+            # and climbs again on the next frame, forever.
+            if self.ladder.exhausted:
+                self.ctx.log.error(
+                    f"recovery gave up after {self.ladder.cycle} cycles at "
+                    f"rung {self.ladder.rung.name} - stopping")
+                self._control_down = False
+                sin.up("w")
+                return False
             if self.ladder.needs_action(now):
                 rung = self.ladder.fire(now)
                 if rung and rung > Rung.RECHECK:
