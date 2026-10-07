@@ -39,20 +39,43 @@ class CombatMacro(Macro):
         self.skill_keys = list(c["skill_keys"])
         self.use_skills = bool(c.get("use_skills", True))
         self.reader = HealthReader()
+        self.timing = (TimingProfile.load(
+            target_ms=float(c["m1_interval_ms"]))
+            if bool(ctx.cfg["adaptation"].get("learn_timing", True))
+            else None)
+        self.adaptation = OnlineAdaptation(
+            enabled=bool(ctx.cfg["adaptation"].get("adapt_thresholds", False)))
         self._i = 0
         self._next_skill = 0.0
-        self._idle_ticks = 0
+        self._last_attack = time.perf_counter()
 
     def setup(self) -> None:
+        t = self.timing
         self.ctx.log.info(
-            f"combat: every {self.interval * 1000:.0f}ms, combo of "
-            f"{self.combo_len}, attack via "
+            f"combat: {self.combo_len}-hit combo, attack via "
             f"{self.ctx.cfg['combat'].get('attack_key', 'mouse1')}, "
-            f"skills {'on' if self.use_skills else 'off'}"
+            f"skills {'on' if self.use_skills else 'off'}, interval "
+            + (f"learning from {t.target_ms:.0f}ms" if t
+               else f"{self.interval * 1000:.0f}ms fixed")
         )
+
+    def teardown(self) -> None:
+        if self.timing and self.timing.learned:
+            try:
+                p = self.timing.save()
+                self.ctx.log.info(
+                    f"learned interval {self.timing.interval_ms:.0f}ms -> {p}")
+            except OSError as exc:
+                self.ctx.log.warning(f"could not save timing: {exc}")
 
     def run(self) -> bool:
         while True:
+            # The safety gate. Without it this macro will happily press keys
+            # into whatever window happens to be at the Roblox rect.
+            if not self.ctx.may_act():
+                time.sleep(0.05)
+                continue
+
             hp = self.reader.read(self.ctx.region_frame("player_health"))
             if hp is not None and hp < 0.25:
                 # Backing off at low health is a correctness decision, not a
@@ -62,22 +85,26 @@ class CombatMacro(Macro):
                 time.sleep(2.0)
                 continue
 
+            now = time.perf_counter()
+            if self.timing is not None:
+                self.timing.observe((now - self._last_attack) * 1000.0)
+            self._last_attack = now
+
             self.ctx.attack()
             self._i = (self._i + 1) % max(1, self.combo_len)
+            self.adaptation.record(True)
 
-            now = time.perf_counter()
             if self.use_skills and self.skill_keys and now >= self._next_skill:
                 key = self.skill_keys[int(now * 3) % len(self.skill_keys)]
                 self.ctx.press(key)
                 self._next_skill = now + self.skill_interval
 
+            base = (self.timing.interval_ms / 1000.0
+                    if self.timing is not None else self.interval)
             # Let the animation finish rather than fighting it. The extra
             # pause after the last hit of a combo is what stops the 5th hit
             # pushing the character out of range.
-            if self._i == 0:
-                time.sleep(self.interval * 1.8)
-            else:
-                time.sleep(self.interval)
+            time.sleep(base * 1.8 if self._i == 0 else base)
 
             if int(now) % 600 < 1:
                 anti_idle_nudge()
@@ -129,6 +156,13 @@ class FishingMacro(Macro):
             now = time.perf_counter()
             dt = now - last
             last = now
+
+            # Fishing holds space, so losing the gate must release it
+            # immediately or the character jumps into a wall.
+            if not self.ctx.may_act():
+                sin.up("space")
+                time.sleep(0.05)
+                continue
 
             bar = self.ctx.region_frame("fishing_bar")
             if bar is None:
@@ -193,7 +227,17 @@ class FishingMacro(Macro):
 
 
 class BossMacro(Macro):
-    """Fight, watch health, retreat when low, heal, go back in."""
+    """Fight a boss: engage, retreat when low, heal, resume, and give up
+    gracefully if it is not making progress.
+
+    The original version of this macro read "boss health bar not visible" as
+    "boss died", and reacted by retreating. But the bar is also invisible
+    when detection fails, when the boss is off-screen, or during a phase
+    transition - so it retreated roughly as often as it won. Absence of
+    evidence is not evidence of absence: a death now requires the bar to be
+    gone AND our own health to have stopped moving, for several frames in a
+    row.
+    """
 
     name = "boss"
 
@@ -206,49 +250,139 @@ class BossMacro(Macro):
         self.max_retreats = int(b["max_retreats"])
         self.boss_hp = HealthReader()
         self.my_hp = HealthReader()
+        self.timing = (TimingProfile.load(
+            target_ms=float(b["attack_interval_ms"]))
+            if bool(ctx.cfg["adaptation"].get("learn_timing", True))
+            else None)
         self._retreats = 0
-        self._idle = 0.0
+        self._state = "engage"
+        self._bars_missing = 0
+        self._last_boss_hp = None
+        self._no_progress = 0.0
+        self._last_attack = time.perf_counter()
+        # Latched once the macro decides it is finished. Without it a
+        # caller that keeps stepping drives the retreat counter past its own
+        # limit, because the "stop" decision has nowhere to be remembered.
+        self._stopped = False
+
+    def setup(self) -> None:
+        self.ctx.log.info(
+            f"boss: {self.interval * 1000:.0f}ms attacks, retreat below "
+            f"{self.retreat_at:.0%} hp, {self.max_retreats} retreats allowed")
+
+    def teardown(self) -> None:
+        if self.timing and self.timing.learned:
+            try:
+                self.timing.save()
+            except OSError:
+                pass
+
+    def step(self, my, boss) -> str:
+        """Decide and act for one frame. Returns the action taken.
+
+        Split out from run() deliberately: the loop is infinite, so testing
+        the decisions through it means fighting the loop. Everything
+        interesting here is one step's worth of state change.
+
+        my, boss are health fractions, or None when unreadable. None means
+        "no data", never a default value - a fabricated 0.0 here would read
+        as a dead player.
+        """
+        if self._stopped:
+            return "stop"
+        if boss is None:
+            self._bars_missing += 1
+        else:
+            if self._bars_missing:
+                self.ctx.log.info("boss bar found again")
+            self._bars_missing = 0
+            # A bar that never moves means we are swinging at air, however
+            # healthy it looks.
+            if self._last_boss_hp is not None and \
+                    abs(boss - self._last_boss_hp) < 0.01:
+                self._no_progress += self.interval
+            else:
+                self._no_progress = 0.0
+            self._last_boss_hp = boss
+
+        # --- retreat and heal -------------------------------------------
+        if self._state == "retreat":
+            if my is not None and my > 0.7:
+                self.ctx.log.info("healed, engaging again")
+                self._retreats = 0
+                self._state = "engage"
+                return "engage"
+            # Count time spent retreating, not just entries into it. Without
+            # this the loop cannot terminate: the low-health branch that
+            # increments the counter is unreachable while already retreating.
+            self._retreats += 1
+            if self._retreats >= self.max_retreats:
+                self.ctx.log.error(
+                    f"no recovery after {self._retreats} retreats - stopping")
+                self._stopped = True
+                return "stop"
+            return "heal"
+
+        # --- low health ---------------------------------------------------
+        if my is not None and my < self.retreat_at:
+            self.ctx.log.warning(
+                f"hp {my:.0%} - retreating "
+                f"({self._retreats + 1}/{self.max_retreats})")
+            self.ctx.hold("s", 500)
+            self._state = "retreat"
+            return "retreat"
+
+        # --- fight over? --------------------------------------------------
+        # Requires the bar gone for a sustained stretch, not one frame. A
+        # single unreadable frame used to be read as a dead boss, which made
+        # this macro retreat about as often as it fought.
+        if self._bars_missing > 45:
+            self.ctx.log.info(
+                f"boss bar absent for {self._bars_missing} frames - "
+                f"treating the fight as over")
+            self.ctx.stats.cycles += 1
+            self._retreats += 1
+            self._state = "retreat"
+            return "fight_over"
+
+        # --- not landing hits ---------------------------------------------
+        if self._no_progress > 20.0:
+            self.ctx.log.warning(
+                f"boss health unchanged for {self._no_progress:.0f}s - "
+                f"probably not in range")
+            self.ctx.hold("w", 600)      # walk toward it
+            self._no_progress = 0.0
+            return "reposition"
+
+        now = time.perf_counter()
+        if self.timing is not None:
+            self.timing.observe((now - self._last_attack) * 1000.0)
+        self._last_attack = now
+        self.ctx.attack()
+        self.ctx.stats.cycles += 1
+        return "attack"
+
+    def _read(self):
+        my = self.my_hp.read(self.ctx.region_frame("player_health"))
+        boss = self.boss_hp.read(self.ctx.region_frame("boss_health"))
+        return my, boss
 
     def run(self) -> bool:
-        attacking = True
         while True:
-            if not attacking:
-                # Retreat: step back, then heal.
-                self.ctx.log.warning(
-                    f"retreat #{self._retreats + 1}/{self.max_retreats}")
-                self.ctx.hold("s", 500)
+            if not self.ctx.may_act():
+                time.sleep(0.05)
+                continue
+
+            action = self.step(*self._read())
+            if action == "stop":
+                return False
+            if action in ("heal",):
                 time.sleep(self.heal_ms)
-                hp = self.my_hp.read(self.ctx.region_frame("player_health"))
-                if hp is not None and hp > 0.7:
-                    self.ctx.log.info("healed, engaging again")
-                    self._retreats = 0
-                    attacking = True
-                elif self._retreats >= self.max_retreats:
-                    self.ctx.log.error("out of retreats, stopping")
-                    return False
-                else:
-                    self._retreats += 1
                 continue
-
-            hp = self.my_hp.read(self.ctx.region_frame("player_health"))
-            boss = self.boss_hp.read(self.ctx.region_frame("boss_health"))
-
-            if boss is None and hp is not None:
-                # Boss bar gone means it died.
-                self.ctx.log.info("boss bar gone - fight over")
-                self.ctx.stats.cycles += 1
-                time.sleep(2.0)
-                if hp is not None and hp > 0.5:
-                    attacking = False  # loot phase
-
-            if hp is not None and hp < self.retreat_at:
-                self.ctx.log.warning(f"hp {hp:.0%} - retreating")
-                attacking = False
+            if action in ("retreat", "fight_over", "engage"):
                 continue
-
-            self.ctx.attack()
-            self.ctx.stats.cycles += 1
-            time.sleep(self.interval)
+            time.sleep(self.timing.interval_ms / 1000.0
+                       if self.timing is not None else self.interval)
 
 
 class AfkFarmMacro(Macro):
