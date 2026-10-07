@@ -1,0 +1,9 @@
+# Slayers Macro - dependencies
+# Tested on Python 3.12.10, Windows 11
+
+numpy>=2.0            # array math, already present
+opencv-python>=4.9    # template matching, colour detection
+mss>=9.0              # fast screen capture
+PyDirectInput>=1.0.4  # fallback synthetic input
+pywin32>=306          # window tracking, DPI awareness, low-level hotkey hook
+pillow>=10.0          # image save/debug

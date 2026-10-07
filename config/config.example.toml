@@ -1,0 +1,113 @@
+# Slayers Macro configuration
+#
+# Every value here can be changed without touching code. Delete a key to
+# fall back to the built-in default. Run `python tools/autotune.py <region>`
+# if detection is failing rather than editing numbers by hand.
+
+[general]
+# Window title substring to attach to.
+window_title = "Roblox"
+
+# Refuse to act unless Roblox is the focused window. Leave this on.
+# It is the single most effective safety setting in the file.
+require_focus = true
+
+# Randomise delays by +/- this many ms. Roblox's own server-side detection
+# documentation names "action cadence" - identical intervals - as a signal.
+# 0 disables jitter. 15-30 is a reasonable starting point for AFK farming.
+jitter_ms = 0
+
+[hotkeys]
+start_stop = "f6"
+panic = "f12"
+recalibrate = "f7"
+
+[input]
+# How long a synthetic key is held. Must exceed one game frame or Roblox
+# may not register it. 18ms is comfortably above the ~4ms floor.
+tap_ms = 18
+
+# Cap the loop rate in Hz. 0 runs flat out. Raise this if you want to
+# leave headroom for other work on the machine.
+loop_hz = 0
+
+[safety]
+# Everything here exists because a macro once attached to a Roblox window
+# that existed but was not the window being looked at, and started pressing
+# keys against whatever was actually on screen.
+
+# Consecutive clean frames required before any input is sent.
+settle_frames = 3
+
+# The window must have been still this long. Blocks input during a resize
+# or a drag, when coordinates are transiently wrong.
+stable_for_ms = 400
+
+# If the pixels at the Roblox rect match a previous frame exactly, another
+# window is probably covering it. Set false only if this false-positives.
+detect_occlusion = true
+
+[combat]
+# Roblox ships M1 unbound. Space is jump. So the default attack is the
+# left mouse button, not a key. Set attack_key to override if you have
+# rebound M1 in-game.
+attack_key = "mouse1"
+
+m1_hold_ms = 18
+m1_interval_ms = 90
+combo_length = 4
+skill_interval_ms = 4000
+skill_keys = ["1", "2", "3"]
+use_skills = true
+
+[adaptation]
+# Learn your real attack interval from observed presses, rather than
+# assuming the configured one. Writes config/timing.json.
+learn_timing = true
+
+# Adjust detection thresholds during play. Slow and one-directional by
+# design - see src/slayersmacro/adaptation.py for why oscillating adapters
+# are worse than fixed thresholds.
+adapt_thresholds = false
+
+[fishing]
+cast_interval_ms = 2600
+hit_band_pct = 12.0
+
+# Decide using the Kalman prediction at the actuation horizon rather than
+# the position just measured. Off = react to the current frame, which is
+# always ~7ms stale by the time the game acts.
+predictive = true
+
+# Stop after this many consecutive frames with no bar detected, instead of
+# pressing keys against a bar the macro cannot see.
+max_consecutive_misses = 12
+
+collect_fish = true
+
+[boss]
+attack_interval_ms = 110
+retreat_hp_pct = 30
+heal_ms = 2200
+max_retreats = 6
+
+[recovery]
+# Frames a problem must persist before the ladder escalates. Most
+# "stuck" detections are a menu or the player touching the keyboard.
+confirm_frames = 4
+
+# Pause between escalation steps.
+step_pause_ms = 900
+
+# Highest rung reached automatically. RESPAWN is the default because
+# server hopping changes your instance and should need a human.
+# Options, in order: hold, recheck, nudge, backoff, turn, rewalk,
+#                     respawn, serverhop
+max_auto_rung = "respawn"
+
+max_cycles = 6
+
+[stuck]
+enabled = true
+detect_ms = 700
+max_retries = 4

@@ -1,0 +1,43 @@
+[general]
+window_title = "Roblox"
+require_focus = true
+jitter_ms = 0
+
+[hotkeys]
+start_stop = "f6"
+panic = "f12"
+recalibrate = "f7"
+toggle_logging = "f8"
+
+[input]
+tap_ms = 18
+loop_hz = 0
+
+[combat]
+m1_hold_ms = 18
+m1_interval_ms = 90
+combo_length = 4
+skill_interval_ms = 4000
+skill_keys = [
+    "1",
+    "2",
+    "3",
+]
+
+[fishing]
+cast_interval_ms = 2600
+hit_band_pct = 12.0
+safety_margin_ms = 15
+buy_bait = false
+collect_fish = true
+
+[boss]
+attack_interval_ms = 110
+retreat_hp_pct = 30
+heal_ms = 2200
+max_retreats = 6
+
+[stuck]
+enabled = true
+detect_ms = 700
+max_retries = 4

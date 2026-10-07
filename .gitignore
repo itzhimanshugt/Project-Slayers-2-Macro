@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Run-time output. Calibration is user-specific, and the logs are large.
+config/calibration.json
+config/timing.json
+logs/
+*.log
+
+# Private notes and scratch output from research.
+research/
+notes/
+scratch/
+*.png
+*.webp
+!docs/*.png
+
+# Exported builds
+build/
+dist/
+*.exe

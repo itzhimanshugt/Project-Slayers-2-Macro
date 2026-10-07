@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slayers-macro"
+version = "0.2.0"
+description = "External screen-reading automation for Project Slayers 2 (Roblox)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["automation", "opencv", "roblox", "screen-reading"]
+
+dependencies = [
+    "numpy>=2.0",
+    "opencv-python>=4.9",
+    "mss>=10.0",
+    "pywin32>=306",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+slayers-macro = "run:main"
+
+[tool.setuptools]
+packages = ["slayersmacro"]
+
+[tool.setuptools.package-dir]
+slayersmacro = "src/slayersmacro"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning"]
