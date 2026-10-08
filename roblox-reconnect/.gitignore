@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Captured frames from live runs. Large and regenerable - run --check or
+# tests/test_response.py to produce them.
+logs/
